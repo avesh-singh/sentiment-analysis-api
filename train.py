@@ -1,6 +1,6 @@
 from model import *
 from data import prepare_data_keras
-from sklearn.metrics import confusion_matrix, precision_score, recall_score
+from sklearn.metrics import precision_score, recall_score, f1_score
 from constants import *
 
 
@@ -28,24 +28,22 @@ def train_iters():
         train_loss = 0
         train_tgt = []
         train_pred = []
-        exp = []
-        pred = []
         for i, batch in enumerate(train_buck):
             loss, train_target, train_prediction = train(batch)
-            train_loss += loss / BATCH_SIZE
+            train_loss += loss
             train_tgt.extend(train_target)
             train_pred.extend(train_prediction)
         valid_loss, expected, prediction = evaluate()
-        if best_valid_loss > valid_loss:
+        if best_valid_loss >= valid_loss:
             print("new best model! improvement: %f" % (best_valid_loss - valid_loss))
             best_valid_loss = valid_loss
             torch.save(model.state_dict(), 'model.pt')
-        exp.extend(expected)
-        pred.extend(prediction)
-        print(f"epochs: {e} | training precision: {precision_score(train_tgt, train_pred):.4f}   | training recall:"
-              f" {recall_score(train_tgt, train_pred):.4f}   |  training loss: {train_loss / len(train_buck):.4f}")
-        print(f"epochs: {e} | validation precision: {precision_score(expected, prediction):.4f} | validation recall: "
-              f"{recall_score(expected, prediction):.4f} | validation loss: {valid_loss:.4f}\n")
+        print(f"epochs: {e} | training precision: {precision_score(train_tgt, train_pred):.4f} | training recall:"
+              f" {recall_score(train_tgt, train_pred):.4f} | training loss: {train_loss / len(train_buck):.4f} |"
+              f" validation precision: {precision_score(expected, prediction):.4f} | validation recall: "
+              f"{recall_score(expected, prediction):.4f} | "
+              f"validation score: {f1_score(expected, prediction):.4f} | "
+              f"validation loss: {valid_loss:.4f}\n")
 
 
 def evaluate():
@@ -58,7 +56,7 @@ def evaluate():
             all_targets.extend(list(label.squeeze().cpu().numpy()))
             text = b[0]
             output = model(text)
-            loss += criterion(output, label) / BATCH_SIZE
+            loss += criterion(output, label)
             pred = list(map(int, output > 0))
             all_preds.extend(pred)
     return loss / len(valid_buck), all_targets, all_preds

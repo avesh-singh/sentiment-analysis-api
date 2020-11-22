@@ -1,18 +1,13 @@
 from model import *
-from data import prepare_data, device, prepare_data_keras
+from data import prepare_data_keras
 from sklearn.metrics import confusion_matrix, precision_score, recall_score
+from constants import *
 
-EMBEDDING_SIZE = 256
-HIDDEN_SIZE = 64
-BATCH_SIZE = 32
-DROPOUT = 0.2
-CLIP = 1
-EPOCHS = 15
 
-# train_buck, valid_buck, test_buck, text_field, label_field = prepare_data(BATCH_SIZE)
-train_buck, valid_buck, test_buck, vocab_size = prepare_data_keras(BATCH_SIZE)
-model = Model(vocab_size, EMBEDDING_SIZE, HIDDEN_SIZE, 1).to(device)
+train_buck, valid_buck, test_buck, valid_weights = prepare_data_keras()
+model = Model(VOCAB_SIZE, EMBEDDING_SIZE, HIDDEN_SIZE, 1, DROPOUT, N_LAYERS).to(device)
 criterion = nn.BCEWithLogitsLoss()
+# validation_criterion = nn.BCEWithLogitsLoss(pos_weight=valid_weights[1])
 optimizer = torch.optim.Adam(model.parameters())
 
 
@@ -23,7 +18,6 @@ def train(batch):
     output = model(text)
     loss = criterion(output, label)
     loss.backward()
-    # nn.utils.clip_grad_norm_(model.parameters(), CLIP)
     optimizer.step()
     return loss.item() / len(batch), list(label.squeeze().cpu().numpy()), list(map(int, output > 0))
 
@@ -38,15 +32,14 @@ def train_iters():
         pred = []
         for i, batch in enumerate(train_buck):
             loss, train_target, train_prediction = train(batch)
-            train_loss += loss / len(batch)
+            train_loss += loss / BATCH_SIZE
             train_tgt.extend(train_target)
             train_pred.extend(train_prediction)
-
         valid_loss, expected, prediction = evaluate()
-        if valid_loss < best_valid_loss:
+        if best_valid_loss > valid_loss:
             print("new best model! improvement: %f" % (best_valid_loss - valid_loss))
             best_valid_loss = valid_loss
-            torch.save(model.state_dict, open('model.pt', 'wb'))
+            torch.save(model.state_dict(), 'model.pt')
         exp.extend(expected)
         pred.extend(prediction)
         print(f"epochs: {e} | training precision: {precision_score(train_tgt, train_pred):.4f}   | training recall:"
@@ -65,10 +58,11 @@ def evaluate():
             all_targets.extend(list(label.squeeze().cpu().numpy()))
             text = b[0]
             output = model(text)
-            loss += criterion(output, label) / len(b)
+            loss += criterion(output, label) / BATCH_SIZE
             pred = list(map(int, output > 0))
             all_preds.extend(pred)
     return loss / len(valid_buck), all_targets, all_preds
 
 
-train_iters()
+if __name__ == '__main__':
+    train_iters()

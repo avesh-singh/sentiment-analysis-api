@@ -1,6 +1,4 @@
-from torchtext.data import TabularDataset, Field, LabelField, Example
-from torchtext.data.iterator import BucketIterator, Iterator
-from torch.utils.data import TensorDataset, RandomSampler, SequentialSampler, DataLoader, BatchSampler
+from torch.utils.data import TensorDataset, RandomSampler, SequentialSampler, DataLoader
 from keras_preprocessing.text import Tokenizer
 from keras_preprocessing.sequence import pad_sequences
 import spacy
@@ -13,20 +11,27 @@ from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 from collections import Counter
 import random
+from constants import VOCAB_SIZE, device, BATCH_SIZE, FILENAME, MAX_SENTENCE_LEN
+import pickle
 import numpy as np
 
 filterwarnings('ignore', '.* class will be retired')
 
 spacy_en = spacy.load('en')
-device = "cuda" if torch.cuda.is_available() else "cpu"
+
 counts = {'only_words': set(), 'others': set()}
 hashtag = re.compile(r'(?:#|@)(\w+\s?)')
-token_pattern = re.compile(r'[a-zA-Z]+')
+# token_pattern = re.compile(r'[a-zA-Z]+')
 stopwords = spacy_en.Defaults.stop_words.union(set(punctuation))
-tokenizer = Tokenizer(oov_token='<unk>', filters='', num_words=5000)
+tokenizer = Tokenizer(oov_token='<unk>', filters='', num_words=VOCAB_SIZE)
 
 
 def en_tokenize(sentence):
+    """
+    removes stopwords and converts tweet hastags/mentions to normal words
+    :param sentence: str, raw sentence from dataset
+    :return: clean sentence
+    """
     if re.search(hashtag, sentence) is not None:
         sentence = re.sub(hashtag, r'\1', sentence)
     tokens = [tok.text for tok in spacy_en.tokenizer(sentence)]
@@ -34,95 +39,101 @@ def en_tokenize(sentence):
     return " ".join(tokens)
 
 
-def prepare_data(batch_size):
-    field = Field(tokenize=en_tokenize,
-                  lower=True)
-    label_field = LabelField()
-    dataset = TabularDataset('data/airline_sentiment_analysis.csv', 'csv',
-                             [('id', None), ('airline_sentiment', label_field), ('text', field)], skip_header=True)
-    train, valid, test = dataset.split([0.8, 0.1, 0.1])
-    field.build_vocab(train, min_freq=2)
-    label_field.build_vocab(train)
-    print(len(train), len(valid), len(test))
-    train_iter, valid_iter, test_iter = Iterator.splits(
-        (train, valid, test),
-        batch_size=batch_size,
-        device=device,
-        # sort_key=lambda x: len(x.split()),
-        # sort=True
-    )
-    # valid_iter = Iterator.splits(
-    #     valid,
-    #     batch_size=batch_size,
-    #     device=device,
-    #     sort_key=lambda x: len(x.split()),
-    #     sort=True
-    # )
-    # test_iter = Iterator.splits(
-    #     test,
-    #     batch_size=batch_size,
-    #     device=device,
-    #     sort_key=lambda x: len(x.split()),
-    #     sort=True
-    # )
-    return train_iter, valid_iter, test_iter, field, label_field
+# def prepare_data(batch_size):
+#     field = Field(tokenize=en_tokenize,
+#                   lower=True)
+#     label_field = LabelField()
+#     dataset = TabularDataset('data/airline_sentiment_analysis.csv', 'csv',
+#                              [('id', None), ('airline_sentiment', label_field), ('text', field)], skip_header=True)
+#     train, valid, test = dataset.split([0.8, 0.1, 0.1])
+#     field.build_vocab(train, min_freq=2)
+#     label_field.build_vocab(train)
+#     print(len(train), len(valid), len(test))
+#     train_iter, valid_iter, test_iter = Iterator.splits(
+#         (train, valid, test),
+#         batch_size=batch_size,
+#         device=device,
+#     )
+#     return train_iter, valid_iter, test_iter, field, label_field
 
 
 def convert_to_tensor(lst):
     return torch.tensor(lst, dtype=torch.long, device=device)
 
 
-def convert_to_seqs(text):
+def convert_to_seqs(tokenizer, text):
+    """
+    converts list of sentences to a torch.Tensor of padded sequences of 'MAX_SENTENCE_LEN' length based on tokenizer
+    :param tokenizer: instance of keras_preprocessing.text.Tokenizer already fitted on data
+    :param text: list of sentences to be tokenized
+    :return: torch.Tensor of size len(text) x MAX_SENTENCE_LEN
+    """
+    text = list(map(en_tokenize, text))
     sequences = tokenizer.texts_to_sequences(text)
-    padded = pad_sequences(sequences, maxlen=15, truncating='post')
+    padded = pad_sequences(sequences, maxlen=MAX_SENTENCE_LEN, truncating='post')
     return convert_to_tensor(padded)
 
 
-def balance_classes(batch):
-    # text, label = batch[0], batch[1]
+def collate_batch(batch):
     text = [t[0] for t in batch]
     label = [t[1] for t in batch]
-    # print(text)
-    desired_count = len(batch) // 2
-    label_counts = Counter([t.item() for t in label])
-    # print(label_counts)
-    class_to_oversample = [key for key, value in label_counts.items() if value < desired_count]
-    if len(class_to_oversample) == 0:
-        print("no class is outnumbered", label_counts)
-    else:
-        class_to_oversample = class_to_oversample[0]
-        indices_to_copy = [i for i, lbl in enumerate(label) if lbl == class_to_oversample]
-        copy_instances = random.choices(indices_to_copy, k=desired_count - label_counts[class_to_oversample])
-        text.extend([text[c] for c in copy_instances])
-        label.extend([label[c] for c in copy_instances])
     return torch.stack(text), torch.stack(label)
 
 
-def create_dataloader(text, label, batch_size, train=False):
-    dataset = TensorDataset(convert_to_seqs(text), convert_to_tensor(label))
+def create_data_loader(text, label, train=False):
+    dataset = TensorDataset(convert_to_seqs(tokenizer, text), convert_to_tensor(label))
     if train:
         sampler = RandomSampler(dataset)
     else:
         sampler = SequentialSampler(dataset)
-    loader = DataLoader(dataset, sampler=sampler, batch_size=batch_size, collate_fn=balance_classes, drop_last=True)
-    # loader = DataLoader(dataset, batch_sampler=BatchSampler(sampler, batch_size, drop_last=False))
+    loader = DataLoader(dataset, sampler=sampler, batch_size=BATCH_SIZE, collate_fn=collate_batch, drop_last=True)
     return loader
 
 
-def prepare_data_keras(batch_size):
-    df = pd.read_csv('data/airline_sentiment_analysis.csv')
+def balance_data(text, labels):
+    """
+    This function balances the dataset by oversampling the minor class. Final response will have equal number of
+    examples from all the classes
+    :param text: array of texts
+    :param labels: array of corresponding labels
+    :return: tuple of oversampled texts and labels
+    """
+    data = np.array([text, labels]).T
+    uniq, uniq_idx = np.unique(data[:, -1], return_inverse=True)
+    uniq_cnt = np.bincount(uniq_idx)
+    cnt = np.max(uniq_cnt)
+    out = np.empty((cnt * len(uniq) - len(data), data.shape[1]), data.dtype)
+    slices = np.concatenate(([0], np.cumsum(cnt - uniq_cnt)))
+    for j in range(len(uniq)):
+        indices = np.random.choice(np.where(uniq_idx == j)[0], cnt - uniq_cnt[j])
+        out[slices[j]:slices[j + 1]] = data[indices]
+    data = np.vstack((data, out))
+    return data[:, 0], data[:, 1].astype(np.int32)
+
+
+def prepare_data_keras():
+    df = pd.read_csv(FILENAME)
     df.drop(columns=['Unnamed: 0'], inplace=True)
-    df['text'] = df['text'].apply(en_tokenize)
     df['airline_sentiment'] = df['airline_sentiment'].apply(lambda x: 1 if x == 'positive' else 0)
     train_text, temp_text, train_label, temp_label = train_test_split(df['text'].values, df['airline_sentiment'].values,
-                                                                      test_size=0.3, stratify=df['airline_sentiment'].values)
-    valid_text, test_text, valid_label, test_label = train_test_split(temp_text, temp_label, test_size=0.5)
+                                                                      test_size=0.3,
+                                                                      stratify=df['airline_sentiment'].values)
+    train_text, train_label = balance_data(train_text, train_label)
+    valid_text, test_text, valid_label, test_label = train_test_split(temp_text, temp_label, test_size=0.5,
+                                                                      stratify=temp_label)
     tokenizer.fit_on_texts(train_text)
+    pickle.dump(tokenizer, open('tokenizer.pkl', 'wb'))
     print(len(tokenizer.word_index))
     print(f"{compute_class_weight('balanced', classes=[0, 1], y=train_label)}\n"
           f"{compute_class_weight('balanced', classes=[0, 1], y=valid_label)}\n"
           f"{compute_class_weight('balanced', classes=[0, 1], y=test_label)}")
-    train_loader = create_dataloader(train_text, train_label, batch_size, True)
-    valid_loader = create_dataloader(valid_text, valid_label, batch_size)
-    test_loader = create_dataloader(test_text, test_label, batch_size)
-    return train_loader, valid_loader, test_loader, len(tokenizer.word_index)
+    train_loader = create_data_loader(train_text, train_label, True)
+    valid_loader = create_data_loader(valid_text, valid_label)
+    test_loader = create_data_loader(test_text, test_label)
+    pd.DataFrame(zip(test_text, test_label)).to_csv('data/test.csv')
+    return train_loader, valid_loader, test_loader, torch.tensor(compute_class_weight('balanced', classes=[0, 1],
+                                                                                      y=valid_label), device=device)
+
+
+if __name__ == '__main__':
+    prepare_data_keras()

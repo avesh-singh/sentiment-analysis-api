@@ -1,13 +1,25 @@
 from wsgiref.simple_server import make_server
 from pyramid.config import Configurator
 from pyramid.response import Response
-from pyramid.view import view_config
+from model import *
+from constants import *
+from data import convert_to_seqs
+import pickle
+
+model = Model(VOCAB_SIZE, EMBEDDING_SIZE, HIDDEN_SIZE, 1, DROPOUT, N_LAYERS).to(device)
+model.load_state_dict(torch.load('model.pt'))
+model.eval()
+tokenizer = pickle.load(open('tokenizer.pkl', 'rb'))
 
 
-# @view_config(route_name='hello', request_method='POST')
 def hello_world(request):
-    print(request.POST['text'])
-    return Response('Hello World!')
+    print()
+    text = [request.POST['text']]
+    input_tensor = convert_to_seqs(tokenizer, text)
+    print(input_tensor)
+    sentiment = model(input_tensor)
+    print(sentiment)
+    return Response('positive' if sentiment > 0 else 'negative')
 
 
 if __name__ == '__main__':

@@ -9,16 +9,14 @@ from string import punctuation
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
-from collections import Counter
-import random
 from constants import VOCAB_SIZE, device, BATCH_SIZE, FILENAME, MAX_SENTENCE_LEN
 import pickle
 import numpy as np
 
-filterwarnings('ignore', '.* class will be retired')
+# filterwarnings('ignore', '.* class will be retired')
 
 spacy_en = spacy.load('en')
-
+np.random.seed(2)
 counts = {'only_words': set(), 'others': set()}
 hashtag = re.compile(r'(?:#|@)(\w+\s?)')
 # token_pattern = re.compile(r'[a-zA-Z]+')
@@ -117,7 +115,8 @@ def prepare_data_keras():
     df['airline_sentiment'] = df['airline_sentiment'].apply(lambda x: 1 if x == 'positive' else 0)
     train_text, temp_text, train_label, temp_label = train_test_split(df['text'].values, df['airline_sentiment'].values,
                                                                       test_size=0.3,
-                                                                      stratify=df['airline_sentiment'].values)
+                                                                      stratify=df['airline_sentiment'].values,
+                                                                      random_state=4)
     train_text, train_label = balance_data(train_text, train_label)
     valid_text, test_text, valid_label, test_label = train_test_split(temp_text, temp_label, test_size=0.5,
                                                                       stratify=temp_label)

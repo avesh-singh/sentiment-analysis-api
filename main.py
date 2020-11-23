@@ -3,20 +3,24 @@ from pyramid.config import Configurator
 from pyramid.response import Response
 from model import *
 from constants import *
-from data import convert_to_seqs
+from data import MAX_SENTENCE_LEN
+from transformers import BertTokenizer
 import pickle
 
-model = Model(VOCAB_SIZE, EMBEDDING_SIZE, HIDDEN_SIZE, 1, N_LAYERS, LIN_DROPOUT, ENC_DROPOUT).to(device)
+model = Model(HIDDEN_SIZE, 1, N_LAYERS, LIN_DROPOUT, BIDIRECTIONAL).to(device)
 model.load_state_dict(torch.load('model.pt'))
 model.eval()
-tokenizer = pickle.load(open('tokenizer.pkl', 'rb'))
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
 
 def hello_world(request):
-    text = [request.POST['text']]
-    input_tensor = convert_to_seqs(tokenizer, text)
+    text = request.POST['text']
+    tokens = tokenizer.tokenize(text)
+    tokens = tokens[:MAX_SENTENCE_LEN-2]
+    indexed = [tokenizer.cls_token_id] + tokenizer.convert_tokens_to_ids(tokens) + [tokenizer.sep_token_id]
+    tensor = torch.LongTensor(indexed).to(device)
+    input_tensor = tensor.unsqueeze(0)
     sentiment = model(input_tensor)
-    # print(sentiment.item())
     return Response('positive' if sentiment > 0 else 'negative')
 
 

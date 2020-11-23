@@ -1,25 +1,24 @@
 from model import *
-from data import prepare_data_keras
+from data import prepare_data
 from sklearn.metrics import precision_score, recall_score, f1_score
 from constants import *
 
 
-train_buck, valid_buck, test_buck, valid_weights = prepare_data_keras()
-model = Model(VOCAB_SIZE, EMBEDDING_SIZE, HIDDEN_SIZE, 1, N_LAYERS, LIN_DROPOUT, ENC_DROPOUT).to(device)
-criterion = nn.BCEWithLogitsLoss()
-# validation_criterion = nn.BCEWithLogitsLoss(pos_weight=valid_weights[1])
+train_buck, valid_buck, test_buck, weights = prepare_data()
+model = Model(HIDDEN_SIZE, 1, N_LAYERS, LIN_DROPOUT, BIDIRECTIONAL).to(device)
+criterion = nn.BCEWithLogitsLoss(pos_weight=weights[1])
 optimizer = torch.optim.Adam(model.parameters())
 
 
 def train(batch):
     model.zero_grad()
-    label = batch[1].view(-1, 1).to(dtype=torch.float)
-    text = batch[0]
+    label = batch.airline_sentiment.view(-1, 1)
+    text = batch.text
     output = model(text)
     loss = criterion(output, label)
     loss.backward()
     optimizer.step()
-    return loss.item() / len(batch), list(label.squeeze().cpu().numpy()), list(map(int, output > 0))
+    return loss.item() / len(batch), list(label.cpu().squeeze().numpy()), list(map(int, output > 0))
 
 
 def train_iters():
@@ -51,10 +50,10 @@ def evaluate():
         all_targets = []
         all_preds = []
         loss = 0
-        for b in valid_buck:
-            label = b[1].view(-1, 1).to(dtype=torch.float)
+        for i, b in enumerate(valid_buck):
+            label = b.airline_sentiment.view(-1, 1)
             all_targets.extend(list(label.squeeze().cpu().numpy()))
-            text = b[0]
+            text = b.text
             output = model(text)
             loss += criterion(output, label)
             pred = list(map(int, output > 0))

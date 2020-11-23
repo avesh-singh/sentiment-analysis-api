@@ -19,7 +19,7 @@ spacy_en = spacy.load('en')
 np.random.seed(2)
 counts = {'only_words': set(), 'others': set()}
 hashtag = re.compile(r'(?:#|@)(\w+\s?)')
-# token_pattern = re.compile(r'[a-zA-Z]+')
+token_pattern = re.compile(r'[a-zA-Z]+')
 stopwords = spacy_en.Defaults.stop_words.union(set(punctuation))
 tokenizer = Tokenizer(oov_token='<unk>', filters='', num_words=VOCAB_SIZE)
 
@@ -68,7 +68,7 @@ def convert_to_seqs(tokenizer, text):
     """
     text = list(map(en_tokenize, text))
     sequences = tokenizer.texts_to_sequences(text)
-    padded = pad_sequences(sequences, maxlen=MAX_SENTENCE_LEN, truncating='post')
+    padded = pad_sequences(sequences, maxlen=MAX_SENTENCE_LEN, truncating='pre')
     return convert_to_tensor(padded)
 
 

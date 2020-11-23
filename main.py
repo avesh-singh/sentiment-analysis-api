@@ -6,19 +6,17 @@ from constants import *
 from data import convert_to_seqs
 import pickle
 
-model = Model(VOCAB_SIZE, EMBEDDING_SIZE, HIDDEN_SIZE, 1, DROPOUT, N_LAYERS).to(device)
+model = Model(VOCAB_SIZE, EMBEDDING_SIZE, HIDDEN_SIZE, 1, N_LAYERS, LIN_DROPOUT, ENC_DROPOUT).to(device)
 model.load_state_dict(torch.load('model.pt'))
 model.eval()
 tokenizer = pickle.load(open('tokenizer.pkl', 'rb'))
 
 
 def hello_world(request):
-    print()
     text = [request.POST['text']]
     input_tensor = convert_to_seqs(tokenizer, text)
-    print(input_tensor)
     sentiment = model(input_tensor)
-    print(sentiment)
+    # print(sentiment.item())
     return Response('positive' if sentiment > 0 else 'negative')
 
 

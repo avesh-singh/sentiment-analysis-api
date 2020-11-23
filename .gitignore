@@ -128,3 +128,6 @@ dmypy.json
 # Pyre type checker
 .pyre/
 data/airline_sentiment_analysis.csv
+data/airline_sentiment_analysis_processed.csv
+model.pt
+Untitled.ipynb

@@ -10,5 +10,5 @@ HIDDEN_SIZE = 128
 N_LAYERS = 2
 BATCH_SIZE = 32
 LIN_DROPOUT = 0.2
-EPOCHS = 5
+EPOCHS = 4
 device = "cuda" if torch.cuda.is_available() else "cpu"

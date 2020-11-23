@@ -1,18 +1,18 @@
 from model import *
 from data import prepare_data
-from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
 from constants import *
 
 
 train_buck, valid_buck, test_buck, weights = prepare_data()
 model = Model(HIDDEN_SIZE, 1, N_LAYERS, LIN_DROPOUT, BIDIRECTIONAL).to(device)
-criterion = nn.BCEWithLogitsLoss(pos_weight=weights[1])
+criterion = nn.BCEWithLogitsLoss()
 optimizer = torch.optim.Adam(model.parameters())
 
 
 def train(batch):
     model.zero_grad()
-    label = batch.airline_sentiment.view(-1, 1)
+    label = batch.sentiment.view(-1, 1)
     text = batch.text
     output = model(text)
     loss = criterion(output, label)
@@ -35,6 +35,7 @@ def train_iters():
         valid_loss, expected, prediction = evaluate()
         if best_valid_loss >= valid_loss:
             print("new best model! improvement: %f" % (best_valid_loss - valid_loss))
+            print(f"{confusion_matrix(expected, prediction)}")
             best_valid_loss = valid_loss
             torch.save(model.state_dict(), 'model.pt')
         print(f"epochs: {e} | training precision: {precision_score(train_tgt, train_pred):.4f} | training recall:"
@@ -51,8 +52,11 @@ def evaluate():
         all_preds = []
         loss = 0
         for i, b in enumerate(valid_buck):
-            label = b.airline_sentiment.view(-1, 1)
-            all_targets.extend(list(label.squeeze().cpu().numpy()))
+            label = b.sentiment.view(-1, 1)
+            try:
+                all_targets.extend(list(label.squeeze().cpu().numpy()))
+            except TypeError:
+                all_targets.extend([label.squeeze().cpu().numpy()])
             text = b.text
             output = model(text)
             loss += criterion(output, label)

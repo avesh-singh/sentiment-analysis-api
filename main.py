@@ -3,7 +3,7 @@ from pyramid.config import Configurator
 from pyramid.response import Response
 from model import *
 from constants import *
-from data import MAX_SENTENCE_LEN
+from data import MAX_SENTENCE_LEN, en_tokenize
 from transformers import BertTokenizer
 import pickle
 
@@ -15,8 +15,7 @@ tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
 def hello_world(request):
     text = request.POST['text']
-    tokens = tokenizer.tokenize(text)
-    tokens = tokens[:MAX_SENTENCE_LEN-2]
+    tokens = en_tokenize(text, tokenizer)
     indexed = [tokenizer.cls_token_id] + tokenizer.convert_tokens_to_ids(tokens) + [tokenizer.sep_token_id]
     tensor = torch.LongTensor(indexed).to(device)
     input_tensor = tensor.unsqueeze(0)

@@ -22,7 +22,7 @@ def train(batch):
 
 
 def train_iters():
-    best_valid_loss = float('inf')
+    best_valid_score = 0
     for e in range(EPOCHS):
         train_loss = 0
         train_tgt = []
@@ -33,9 +33,10 @@ def train_iters():
             train_tgt.extend(train_target)
             train_pred.extend(train_prediction)
         valid_loss, expected, prediction = evaluate()
-        if best_valid_loss >= valid_loss:
-            print("new best model! improvement: %f" % (best_valid_loss - valid_loss))
-            best_valid_loss = valid_loss
+        valid_score = f1_score(expected, prediction)
+        if best_valid_score < valid_score:
+            print("new best model! improvement: %f" % (valid_score - best_valid_score))
+            best_valid_score = valid_score
             torch.save(model.state_dict(), 'model.pt')
         print(f"epochs: {e} | training precision: {precision_score(train_tgt, train_pred):.4f} | training recall:"
               f" {recall_score(train_tgt, train_pred):.4f} | training loss: {train_loss / len(train_buck):.4f} |"

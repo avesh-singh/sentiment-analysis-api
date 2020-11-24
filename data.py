@@ -12,9 +12,6 @@ from sklearn.utils.class_weight import compute_class_weight
 from constants import VOCAB_SIZE, device, BATCH_SIZE, FILENAME, MAX_SENTENCE_LEN
 import pickle
 import numpy as np
-import os
-import random
-from utils import *
 
 # filterwarnings('ignore', '.* class will be retired')
 
@@ -33,9 +30,29 @@ def en_tokenize(sentence):
     :param sentence: str, raw sentence from dataset
     :return: clean sentence
     """
-    tokens = [tok.text for tok in spacy_en.tokenizer(clean_sentence(sentence))]
+    if re.search(hashtag, sentence) is not None:
+        sentence = re.sub(hashtag, r'\1', sentence)
+    tokens = [tok.text for tok in spacy_en.tokenizer(sentence)]
     tokens = [tok for tok in tokens if tok not in stopwords]
     return " ".join(tokens)
+
+
+# def prepare_data(batch_size):
+#     field = Field(tokenize=en_tokenize,
+#                   lower=True)
+#     label_field = LabelField()
+#     dataset = TabularDataset('data/airline_sentiment_analysis.csv', 'csv',
+#                              [('id', None), ('airline_sentiment', label_field), ('text', field)], skip_header=True)
+#     train, valid, test = dataset.split([0.8, 0.1, 0.1])
+#     field.build_vocab(train, min_freq=2)
+#     label_field.build_vocab(train)
+#     print(len(train), len(valid), len(test))
+#     train_iter, valid_iter, test_iter = Iterator.splits(
+#         (train, valid, test),
+#         batch_size=batch_size,
+#         device=device,
+#     )
+#     return train_iter, valid_iter, test_iter, field, label_field
 
 
 def convert_to_tensor(lst):

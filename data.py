@@ -12,6 +12,7 @@ from sklearn.utils.class_weight import compute_class_weight
 from constants import VOCAB_SIZE, device, BATCH_SIZE, FILENAME, MAX_SENTENCE_LEN
 import pickle
 import numpy as np
+from utils import clean_sentence
 
 # filterwarnings('ignore', '.* class will be retired')
 
@@ -30,9 +31,7 @@ def en_tokenize(sentence):
     :param sentence: str, raw sentence from dataset
     :return: clean sentence
     """
-    if re.search(hashtag, sentence) is not None:
-        sentence = re.sub(hashtag, r'\1', sentence)
-    tokens = [tok.text for tok in spacy_en.tokenizer(sentence)]
+    tokens = [tok.text for tok in spacy_en.tokenizer(clean_sentence(sentence.lower()))]
     tokens = [tok for tok in tokens if tok not in stopwords]
     return " ".join(tokens)
 

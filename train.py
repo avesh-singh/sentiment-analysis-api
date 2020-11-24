@@ -5,9 +5,8 @@ from constants import *
 
 
 train_buck, valid_buck, test_buck, valid_weights = prepare_data_keras()
-model = Model(VOCAB_SIZE, EMBEDDING_SIZE, HIDDEN_SIZE, 1, N_LAYERS, LIN_DROPOUT, ENC_DROPOUT).to(device)
+model = Model(VOCAB_SIZE, EMBEDDING_SIZE, HIDDEN_SIZE, 1, LIN_DROPOUT).to(device)
 criterion = nn.BCEWithLogitsLoss()
-# validation_criterion = nn.BCEWithLogitsLoss(pos_weight=valid_weights[1])
 optimizer = torch.optim.Adam(model.parameters())
 
 

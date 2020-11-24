@@ -6,7 +6,7 @@ from constants import *
 from data import convert_to_seqs
 import pickle
 
-model = Model(VOCAB_SIZE, EMBEDDING_SIZE, HIDDEN_SIZE, 1, N_LAYERS, LIN_DROPOUT, ENC_DROPOUT).to(device)
+model = Model(VOCAB_SIZE, EMBEDDING_SIZE, HIDDEN_SIZE, 1, LIN_DROPOUT).to(device)
 model.load_state_dict(torch.load('model.pt'))
 model.eval()
 tokenizer = pickle.load(open('tokenizer.pkl', 'rb'))

@@ -8,9 +8,10 @@ import numpy as np
 train_loader, valid_loader, test_loader, train_len, valid_len, test_len = load_data()
 model = model.to(device)
 criterion = nn.CrossEntropyLoss()
+
+# as per original bert paper, fine-tuning is done by Adam optimizer with weight decay
 optimizer = AdamW(model.parameters(), lr=2e-5, correct_bias=False)
 total_steps = len(train_loader) * EPOCHS
-
 scheduler = get_linear_schedule_with_warmup(
     optimizer,
     num_warmup_steps=0,

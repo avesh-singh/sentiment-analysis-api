@@ -20,6 +20,11 @@ def extract_emotion(means):
 
 
 def clean_sentence(sentence):
+    """
+    replaces all emojis and emoticons with their text equivalent
+    :param sentence: str, raw text
+    :return: clean text
+    """
     reference = demoji.findall(sentence)
     # print(reference)
     emoticons = emot.emoticons(sentence)

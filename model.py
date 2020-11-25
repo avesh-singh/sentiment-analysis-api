@@ -1,5 +1,4 @@
 import torch.nn as nn
-import torch
 from transformers import BertModel
 from constants import *
 
@@ -31,4 +30,4 @@ class SentimentModel(nn.Module):
         return output
 
 
-model = SentimentModel(HIDDEN_SIZE, 2, N_LAYERS, DROPOUT, BIDIRECTIONAL)
+model = SentimentModel(HIDDEN_SIZE, OUTPUT_LAYERS, N_LAYERS, DROPOUT, BIDIRECTIONAL)

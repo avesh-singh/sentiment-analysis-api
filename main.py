@@ -1,32 +1,31 @@
 from wsgiref.simple_server import make_server
 from pyramid.config import Configurator
 from pyramid.response import Response
-from model import *
+from model import model
+from dataset import Tokenizer
 from constants import *
-from data import MAX_SENTENCE_LEN, en_tokenize
-from transformers import BertTokenizer
-import pickle
+import torch
+import json
 
-model = Model(HIDDEN_SIZE, 1, N_LAYERS, LIN_DROPOUT, BIDIRECTIONAL).to(device)
+tokenizer = Tokenizer()
+model = model.to(device)
 model.load_state_dict(torch.load('model.pt'))
 model.eval()
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
 
-def hello_world(request):
+def predict_sentiment(request):
     text = request.POST['text']
-    tokens = en_tokenize(text, tokenizer)
-    indexed = [tokenizer.cls_token_id] + tokenizer.convert_tokens_to_ids(tokens) + [tokenizer.sep_token_id]
-    tensor = torch.LongTensor(indexed).to(device)
-    input_tensor = tensor.unsqueeze(0)
-    sentiment = model(input_tensor)
-    return Response('positive' if sentiment > 0 else 'negative')
+    tokenized = tokenizer(text, MAX_SENTENCE_LEN)
+    output = model(tokenized['input_ids'].to(device), tokenized['attention_mask'].to(device))
+    prediction = torch.max(output, dim=1)[1]
+    resp = {'sentiment': 'positive' if prediction > 0 else 'negative'}
+    return Response(body=json.dumps(resp))
 
 
 if __name__ == '__main__':
     with Configurator() as config:
-        config.add_route('hello', '/')
-        config.add_view(view=hello_world, route_name='hello', request_method='POST')
+        config.add_route('sentiment', '/')
+        config.add_view(view=predict_sentiment, route_name='sentiment', request_method='POST')
         app = config.make_wsgi_app()
     server = make_server('0.0.0.0', 6543, app)
     server.serve_forever()

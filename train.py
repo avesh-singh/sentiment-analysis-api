@@ -1,68 +1,94 @@
-from model import *
-from data import prepare_data
+from model import model, nn
+from data import load_data
 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
 from constants import *
+from transformers import AdamW, get_linear_schedule_with_warmup
+import numpy as np
+
+train_loader, valid_loader, train_len, valid_len = load_data()
+model = model.to(device)
+criterion = nn.CrossEntropyLoss()
+optimizer = AdamW(model.parameters(), lr=2e-5, correct_bias=False)
+total_steps = len(train_loader) * EPOCHS
+
+scheduler = get_linear_schedule_with_warmup(
+    optimizer,
+    num_warmup_steps=0,
+    num_training_steps=total_steps
+)
 
 
-train_buck, valid_buck, test_buck, weights = prepare_data()
-model = Model(HIDDEN_SIZE, 1, N_LAYERS, LIN_DROPOUT, BIDIRECTIONAL).to(device)
-criterion = nn.BCEWithLogitsLoss()
-optimizer = torch.optim.Adam(model.parameters())
+def train(model):
+    model = model.train()
+    optimizer.zero_grad()
 
-
-def train(batch):
-    model.zero_grad()
-    label = batch.sentiment.view(-1, 1)
-    text = batch.text
-    output = model(text)
-    loss = criterion(output, label)
-    loss.backward()
-    optimizer.step()
-    return loss.item() / len(batch), list(label.cpu().squeeze().numpy()), list(map(int, output > 0))
+    losses = []
+    accurate_preds = 0
+    all_targets = []
+    all_predictions = []
+    for d in train_loader:
+        inputs = d['input_ids'].to(device)
+        masks = d['attention_mask'].to(device)
+        all_targets.extend(list(d['targets'].squeeze().numpy()))
+        targets = d['targets'].to(device)
+        outputs = model(
+            input_ids=inputs,
+            attention_mask=masks
+        )
+        _, preds = torch.max(outputs, dim=1)
+        loss = criterion(outputs, targets)
+        all_predictions.extend(list(preds.cpu().squeeze().numpy()))
+        accurate_preds += torch.sum(preds == targets)
+        losses.append(loss.item())
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+        scheduler.step()
+    return accurate_preds / train_len, np.mean(losses), all_targets, all_predictions
 
 
 def train_iters():
-    best_valid_loss = float('inf')
+    best_valid_acc = 0
     for e in range(EPOCHS):
-        train_loss = 0
-        train_tgt = []
-        train_pred = []
-        for i, batch in enumerate(train_buck):
-            loss, train_target, train_prediction = train(batch)
-            train_loss += loss
-            train_tgt.extend(train_target)
-            train_pred.extend(train_prediction)
-        valid_loss, expected, prediction = evaluate()
-        if best_valid_loss >= valid_loss:
-            print("new best model! improvement: %f" % (best_valid_loss - valid_loss))
-            print(f"{confusion_matrix(expected, prediction)}")
-            best_valid_loss = valid_loss
-            torch.save(model.state_dict(), 'model.pt')
-        print(f"epochs: {e} | training precision: {precision_score(train_tgt, train_pred):.4f} | training recall:"
-              f" {recall_score(train_tgt, train_pred):.4f} | training loss: {train_loss / len(train_buck):.4f} |"
-              f" validation precision: {precision_score(expected, prediction):.4f} | validation recall: "
+        print(f"epoch: {e}")
+        train_acc, train_loss, train_tgt, train_pred = train(model)
+        print(f"training loss: {train_loss:.4f} | training accuracy: {train_acc:.4f} | training precision:"
+              f" {precision_score(train_tgt, train_pred):.4f} | training recall:"
+              f" {recall_score(train_tgt, train_pred):.4f}")
+        valid_acc, valid_loss, expected, prediction = evaluate(model)
+        print(f"validation loss: {valid_loss:.4f} | validation accuracy: {valid_acc:.4f} | validation precision:"
+              f" {precision_score(expected, prediction):.4f} | validation recall: "
               f"{recall_score(expected, prediction):.4f} | "
-              f"validation score: {f1_score(expected, prediction):.4f} | "
-              f"validation loss: {valid_loss:.4f}\n")
+              f"validation score: {f1_score(expected, prediction):.4f}")
+        if best_valid_acc < valid_acc:
+            print("new best model! improvement: %f" % (best_valid_acc - valid_acc))
+            print(f"{confusion_matrix(expected, prediction)}")
+            best_valid_acc = valid_acc
+            torch.save(model.state_dict(), 'model.pt')
 
 
-def evaluate():
+def evaluate(model):
+    model = model.eval()
     with torch.no_grad():
         all_targets = []
         all_preds = []
-        loss = 0
-        for i, b in enumerate(valid_buck):
-            label = b.sentiment.view(-1, 1)
-            try:
-                all_targets.extend(list(label.squeeze().cpu().numpy()))
-            except TypeError:
-                all_targets.extend([label.squeeze().cpu().numpy()])
-            text = b.text
-            output = model(text)
-            loss += criterion(output, label)
-            pred = list(map(int, output > 0))
-            all_preds.extend(pred)
-    return loss / len(valid_buck), all_targets, all_preds
+        accurate_preds = 0
+        losses = []
+        for d in valid_loader:
+            inputs = d['input_ids'].to(device)
+            masks = d['attention_mask'].to(device)
+            all_targets.extend(list(d['targets'].squeeze().numpy()))
+            targets = d['targets'].to(device)
+            outputs = model(
+                input_ids=inputs,
+                attention_mask=masks
+            )
+            _, preds = torch.max(outputs, dim=1)
+            loss = criterion(outputs, targets)
+            all_preds.extend(list(preds.cpu().squeeze().numpy()))
+            accurate_preds += torch.sum(preds == targets)
+            losses.append(loss.item())
+    return accurate_preds / valid_len, np.mean(losses), all_targets, all_preds
 
 
 if __name__ == '__main__':

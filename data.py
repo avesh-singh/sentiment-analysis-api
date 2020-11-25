@@ -75,14 +75,16 @@ def load_data():
     df.reset_index(drop=True, inplace=True)
     df['sentiment'] = df['airline_sentiment'].apply(lambda x: 1 if x == 'positive' else 0)
     df['text'] = df['text'].apply(clean_sentence)
-    df_train, df_valid = train_test_split(df, test_size=0.2, random_state=5)
+    df_train, df_valid = train_test_split(df, test_size=0.3, random_state=5)
+    df_valid, df_test = train_test_split(df_valid, test_size=0.5, random_state=5)
     df_train.reset_index(inplace=True)
     df_train = balance_data(df_train, 'over')
     tokenizer = Tokenizer()
     train_data_loader = create_data_loader(df_train, tokenizer, MAX_SENTENCE_LEN, BATCH_SIZE)
     valid_data_loader = create_data_loader(df_valid, tokenizer, MAX_SENTENCE_LEN, BATCH_SIZE)
-    return train_data_loader, valid_data_loader, len(df_train), len(df_valid)
+    test_data_loader = create_data_loader(df_test, tokenizer, MAX_SENTENCE_LEN, BATCH_SIZE)
+    return train_data_loader, valid_data_loader, test_data_loader, len(df_train), len(df_valid), len(df_test)
 
 
 if __name__ == '__main__':
-    train_loader, valid_loader, train_len, valid_len = load_data()
+    train_loader, valid_loader, test_loader, train_len, valid_len, test_len = load_data()

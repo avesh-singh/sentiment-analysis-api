@@ -1,13 +1,12 @@
 from model import *
 from data import prepare_data_keras
-from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 from constants import *
 
 
-train_buck, valid_buck, test_buck, valid_weights = prepare_data_keras()
+train_buck, valid_buck, test_buck = prepare_data_keras()
 model = Model(VOCAB_SIZE, EMBEDDING_SIZE, HIDDEN_SIZE, 1, N_LAYERS, LIN_DROPOUT, ENC_DROPOUT).to(device)
 criterion = nn.BCEWithLogitsLoss()
-# validation_criterion = nn.BCEWithLogitsLoss(pos_weight=valid_weights[1])
 optimizer = torch.optim.Adam(model.parameters())
 
 
@@ -23,7 +22,7 @@ def train(batch):
 
 
 def train_iters():
-    best_valid_loss = float('inf')
+    best_valid_acc = 0
     for e in range(EPOCHS):
         train_loss = 0
         train_tgt = []
@@ -33,25 +32,29 @@ def train_iters():
             train_loss += loss
             train_tgt.extend(train_target)
             train_pred.extend(train_prediction)
-        valid_loss, expected, prediction = evaluate()
-        if best_valid_loss >= valid_loss:
-            print("new best model! improvement: %f" % (best_valid_loss - valid_loss))
-            best_valid_loss = valid_loss
+        valid_loss, expected, prediction = evaluate(valid_buck)
+        valid_acc = accuracy_score(expected, prediction)
+        if best_valid_acc < valid_acc:
+            print("new best model! improvement: %f" % (best_valid_acc - valid_acc))
+            best_valid_acc = valid_acc
             torch.save(model.state_dict(), 'model.pt')
-        print(f"epochs: {e} | training precision: {precision_score(train_tgt, train_pred):.4f} | training recall:"
-              f" {recall_score(train_tgt, train_pred):.4f} | training loss: {train_loss / len(train_buck):.4f} |"
+        print(f"epochs: {e} | training acc: {accuracy_score(train_tgt, train_pred):.4f} | training precision:"
+              f" {precision_score(train_tgt, train_pred):.4f} | "
+              f"training "
+              f"recall:"
+              f" {recall_score(train_tgt, train_pred):.4f} | training loss: {train_loss / len(train_buck):.4f}\n"
               f" validation precision: {precision_score(expected, prediction):.4f} | validation recall: "
               f"{recall_score(expected, prediction):.4f} | "
-              f"validation score: {f1_score(expected, prediction):.4f} | "
+              f"validation score: {accuracy_score(expected, prediction):.4f} | "
               f"validation loss: {valid_loss:.4f}\n")
 
 
-def evaluate():
+def evaluate(iterator):
     with torch.no_grad():
         all_targets = []
         all_preds = []
         loss = 0
-        for b in valid_buck:
+        for b in iterator:
             label = b[1].view(-1, 1).to(dtype=torch.float)
             all_targets.extend(list(label.squeeze().cpu().numpy()))
             text = b[0]
@@ -64,3 +67,9 @@ def evaluate():
 
 if __name__ == '__main__':
     train_iters()
+    model.load_state_dict(torch.load('model.pt'))
+    model.eval()
+    loss, tgt, pred = evaluate(test_buck)
+    print(f"test precision: {precision_score(tgt, pred):.4f} | test recall: {recall_score(tgt, pred):.4f} | "
+              f"test score: {accuracy_score(tgt, pred):.4f}"
+          )

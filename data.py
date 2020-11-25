@@ -128,9 +128,7 @@ def prepare_data_keras():
     train_loader = create_data_loader(train_text, train_label, True)
     valid_loader = create_data_loader(valid_text, valid_label)
     test_loader = create_data_loader(test_text, test_label)
-    pd.DataFrame(zip(test_text, test_label)).to_csv('data/test.csv')
-    return train_loader, valid_loader, test_loader, torch.tensor(compute_class_weight('balanced', classes=[0, 1],
-                                                                                      y=valid_label), device=device)
+    return train_loader, valid_loader, test_loader
 
 
 if __name__ == '__main__':

@@ -1,29 +1,29 @@
 from wsgiref.simple_server import make_server
 from pyramid.config import Configurator
-from pyramid.response import Response
-from model import *
+from model import model
+from dataset import Tokenizer
 from constants import *
-from data import convert_to_seqs
-import pickle
+import torch
 
-model = Model(VOCAB_SIZE, EMBEDDING_SIZE, HIDDEN_SIZE, 1, LIN_DROPOUT).to(device)
+tokenizer = Tokenizer()
+model = model.to(device)
 model.load_state_dict(torch.load('model.pt'))
 model.eval()
-tokenizer = pickle.load(open('tokenizer.pkl', 'rb'))
 
 
-def hello_world(request):
-    text = [request.POST['text']]
-    input_tensor = convert_to_seqs(tokenizer, text)
-    sentiment = model(input_tensor)
-    # print(sentiment.item())
-    return Response('positive' if sentiment > 0 else 'negative')
+def sentiment(request):
+    text = request.POST['text']
+    tokenized = tokenizer(text, MAX_SENTENCE_LEN)
+    output = model(tokenized['input_ids'].to(device), tokenized['attention_mask'].to(device))
+    prediction = torch.max(output, dim=1)[1]
+    resp = {'sentiment': 'positive' if prediction > 0 else 'negative'}
+    return resp
 
 
 if __name__ == '__main__':
     with Configurator() as config:
-        config.add_route('hello', '/')
-        config.add_view(view=hello_world, route_name='hello', request_method='POST')
+        config.add_route('sentiment', '/sentiment')
+        config.add_view(sentiment, route_name='sentiment', request_method='POST', renderer='json')
         app = config.make_wsgi_app()
     server = make_server('0.0.0.0', 6543, app)
     server.serve_forever()

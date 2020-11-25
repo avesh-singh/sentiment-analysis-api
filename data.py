@@ -1,121 +1,95 @@
-from torch.utils.data import TensorDataset, RandomSampler, SequentialSampler, DataLoader
-from keras_preprocessing.text import Tokenizer
-from keras_preprocessing.sequence import pad_sequences
-import spacy
-import re
-import torch
 from warnings import filterwarnings
-from string import punctuation
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.utils.class_weight import compute_class_weight
-from constants import VOCAB_SIZE, device, BATCH_SIZE, FILENAME, MAX_SENTENCE_LEN
-import pickle
+from constants import BATCH_SIZE, MAX_SENTENCE_LEN, FILENAME
 import numpy as np
-import os
+from collections import Counter
 import random
-from utils import *
+from dataset import *
+import emot
+import demoji
 
-# filterwarnings('ignore', '.* class will be retired')
-
-spacy_en = spacy.load('en')
+filterwarnings('ignore', '.* class will be retired')
 np.random.seed(2)
-counts = {'only_words': set(), 'others': set()}
-hashtag = re.compile(r'(?:#|@)(\w+\s?)')
-token_pattern = re.compile(r'[a-zA-Z]+')
-stopwords = spacy_en.Defaults.stop_words.union(set(punctuation))
-tokenizer = Tokenizer(oov_token='<unk>', filters='', num_words=VOCAB_SIZE)
+random.seed(2)
 
 
-def en_tokenize(sentence):
+def extract_emotion(means):
+    meanings = means.split(',')
+    return random.choice(meanings)
+
+
+def clean_sentence(sentence):
     """
-    removes stopwords and converts tweet hastags/mentions to normal words
-    :param sentence: str, raw sentence from dataset
-    :return: clean sentence
+    replaces all emojis and emoticons with their text equivalent
+    :param sentence: str, raw text
+    :return: clean text
     """
-    tokens = [tok.text for tok in spacy_en.tokenizer(clean_sentence(sentence))]
-    tokens = [tok for tok in tokens if tok not in stopwords]
-    return " ".join(tokens)
+    reference = demoji.findall(sentence)
+    # print(reference)
+    emoticons = emot.emoticons(sentence)
+    if isinstance(emoticons, list):
+        emoticons = emoticons[0]
+    # print(emoticons)
+    if len(reference) > 0:
+        for key, value in reference.items():
+            sentence = sentence.replace(key, value+" ")
+    if emoticons['flag']:
+        for i in range(len(emoticons['value'])):
+            # print(emoticons['value'][i])
+            sentence = sentence.replace(emoticons['value'][i], extract_emotion(emoticons['mean'][i]))
+    return sentence
 
 
-def convert_to_tensor(lst):
-    return torch.tensor(lst, dtype=torch.long, device=device)
+def create_data_loader(df, tokenizer, max_len, batch_size):
+    dataset = AirlineTweetsDataset(
+        tweets=df.text.to_numpy(),
+        sentiments=df.sentiment.to_numpy(),
+        tokenizer=tokenizer,
+        max_len=max_len
+    )
+    return dataset.get_data_loader(batch_size)
 
 
-def convert_to_seqs(tokenizer, text):
+def balance_data(df, strategy='under'):
     """
-    converts list of sentences to a torch.Tensor of padded sequences of 'MAX_SENTENCE_LEN' length based on tokenizer
-    :param tokenizer: instance of keras_preprocessing.text.Tokenizer already fitted on data
-    :param text: list of sentences to be tokenized
-    :return: torch.Tensor of size len(text) x MAX_SENTENCE_LEN
+    This function balances the input dataframe in case of imbalance data
+    :param df: pandas.DataFrame
+    :param strategy: str, either 'over' for over-sampling or 'under' for under-sampling
+    :return: pandas.DataFrame, dataframe with equal number of samples for both classes
     """
-    text = list(map(en_tokenize, text))
-    sequences = tokenizer.texts_to_sequences(text)
-    padded = pad_sequences(sequences, maxlen=MAX_SENTENCE_LEN, truncating='pre')
-    return convert_to_tensor(padded)
+    func = None
+    assert strategy in ['over', 'under'], "strategy should be either 'over' or 'under'"
+    if strategy == 'over':
+        func = max
+    elif strategy == 'under':
+        func = min
+    labels = Counter(df['sentiment'])
+    imp_class_count = func(labels.items(), key=lambda x: x[1])
+    imp_class_examples = df[df['sentiment'] == imp_class_count[0]]
+    sampled_examples = df[df['sentiment'] != imp_class_count[0]].sample(n=imp_class_count[1], replace=True,
+                                                                        random_state=5)
+    final = pd.concat([imp_class_examples, sampled_examples], axis='rows')\
+        .sample(frac=1, replace=True, random_state=5).reset_index()
+    return final[['text', 'sentiment']]
 
 
-def collate_batch(batch):
-    text = [t[0] for t in batch]
-    label = [t[1] for t in batch]
-    return torch.stack(text), torch.stack(label)
-
-
-def create_data_loader(text, label, train=False):
-    dataset = TensorDataset(convert_to_seqs(tokenizer, text), convert_to_tensor(label))
-    if train:
-        sampler = RandomSampler(dataset)
-    else:
-        sampler = SequentialSampler(dataset)
-    loader = DataLoader(dataset, sampler=sampler, batch_size=BATCH_SIZE, collate_fn=collate_batch, drop_last=True)
-    return loader
-
-
-def balance_data(text, labels):
-    """
-    This function balances the dataset by oversampling the minor class. Final response will have equal number of
-    examples from all the classes
-    :param text: array of texts
-    :param labels: array of corresponding labels
-    :return: tuple of oversampled texts and labels
-    """
-    data = np.array([text, labels]).T
-    uniq, uniq_idx = np.unique(data[:, -1], return_inverse=True)
-    uniq_cnt = np.bincount(uniq_idx)
-    cnt = np.max(uniq_cnt)
-    out = np.empty((cnt * len(uniq) - len(data), data.shape[1]), data.dtype)
-    slices = np.concatenate(([0], np.cumsum(cnt - uniq_cnt)))
-    for j in range(len(uniq)):
-        indices = np.random.choice(np.where(uniq_idx == j)[0], cnt - uniq_cnt[j])
-        out[slices[j]:slices[j + 1]] = data[indices]
-    data = np.vstack((data, out))
-    return data[:, 0], data[:, 1].astype(np.int32)
-
-
-def prepare_data_keras():
+def load_data():
     df = pd.read_csv(FILENAME)
     df.drop(columns=['Unnamed: 0'], inplace=True)
-    df['airline_sentiment'] = df['airline_sentiment'].apply(lambda x: 1 if x == 'positive' else 0)
-    train_text, temp_text, train_label, temp_label = train_test_split(df['text'].values, df['airline_sentiment'].values,
-                                                                      test_size=0.3,
-                                                                      stratify=df['airline_sentiment'].values,
-                                                                      random_state=4)
-    train_text, train_label = balance_data(train_text, train_label)
-    valid_text, test_text, valid_label, test_label = train_test_split(temp_text, temp_label, test_size=0.5,
-                                                                      stratify=temp_label)
-    tokenizer.fit_on_texts(train_text)
-    pickle.dump(tokenizer, open('tokenizer.pkl', 'wb'))
-    print(len(tokenizer.word_index))
-    print(f"{compute_class_weight('balanced', classes=[0, 1], y=train_label)}\n"
-          f"{compute_class_weight('balanced', classes=[0, 1], y=valid_label)}\n"
-          f"{compute_class_weight('balanced', classes=[0, 1], y=test_label)}")
-    train_loader = create_data_loader(train_text, train_label, True)
-    valid_loader = create_data_loader(valid_text, valid_label)
-    test_loader = create_data_loader(test_text, test_label)
-    pd.DataFrame(zip(test_text, test_label)).to_csv('data/test.csv')
-    return train_loader, valid_loader, test_loader, torch.tensor(compute_class_weight('balanced', classes=[0, 1],
-                                                                                      y=valid_label), device=device)
+    df.reset_index(drop=True, inplace=True)
+    df['sentiment'] = df['airline_sentiment'].apply(lambda x: 1 if x == 'positive' else 0)
+    df['text'] = df['text'].apply(clean_sentence)
+    df_train, df_valid = train_test_split(df, test_size=0.3, random_state=5)
+    df_valid, df_test = train_test_split(df_valid, test_size=0.5, random_state=5)
+    df_train.reset_index(inplace=True)
+    df_train = balance_data(df_train, 'over')
+    tokenizer = Tokenizer()
+    train_data_loader = create_data_loader(df_train, tokenizer, MAX_SENTENCE_LEN, BATCH_SIZE)
+    valid_data_loader = create_data_loader(df_valid, tokenizer, MAX_SENTENCE_LEN, BATCH_SIZE)
+    test_data_loader = create_data_loader(df_test, tokenizer, MAX_SENTENCE_LEN, BATCH_SIZE)
+    return train_data_loader, valid_data_loader, test_data_loader, len(df_train), len(df_valid), len(df_test)
 
 
 if __name__ == '__main__':
-    prepare_data_keras()
+    train_loader, valid_loader, test_loader, train_len, valid_len, test_len = load_data()

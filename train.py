@@ -1,74 +1,100 @@
-from model import *
-from data import prepare_data, device, prepare_data_keras
-from sklearn.metrics import confusion_matrix, precision_score, recall_score
+from model import model, nn
+from data import load_data
+from sklearn.metrics import precision_score, recall_score
+from constants import *
+from transformers import AdamW, get_linear_schedule_with_warmup
+import numpy as np
 
-EMBEDDING_SIZE = 256
-HIDDEN_SIZE = 64
-BATCH_SIZE = 32
-DROPOUT = 0.2
-CLIP = 1
-EPOCHS = 15
+train_loader, valid_loader, test_loader, train_len, valid_len, test_len = load_data()
+model = model.to(device)
+criterion = nn.CrossEntropyLoss()
 
-# train_buck, valid_buck, test_buck, text_field, label_field = prepare_data(BATCH_SIZE)
-train_buck, valid_buck, test_buck, vocab_size = prepare_data_keras(BATCH_SIZE)
-model = Model(vocab_size, EMBEDDING_SIZE, HIDDEN_SIZE, 1).to(device)
-criterion = nn.BCEWithLogitsLoss()
-optimizer = torch.optim.Adam(model.parameters())
+# as per original bert paper, fine-tuning is done by Adam optimizer with weight decay
+optimizer = AdamW(model.parameters(), lr=2e-5, correct_bias=False)
+total_steps = len(train_loader) * EPOCHS
+scheduler = get_linear_schedule_with_warmup(
+    optimizer,
+    num_warmup_steps=0,
+    num_training_steps=total_steps
+)
 
 
-def train(batch):
-    model.zero_grad()
-    label = batch[1].view(-1, 1).to(dtype=torch.float)
-    text = batch[0]
-    output = model(text)
-    loss = criterion(output, label)
-    loss.backward()
-    # nn.utils.clip_grad_norm_(model.parameters(), CLIP)
-    optimizer.step()
-    return loss.item() / len(batch), list(label.squeeze().cpu().numpy()), list(map(int, output > 0))
+def train(model):
+    model = model.train()
+    optimizer.zero_grad()
+
+    losses = []
+    accurate_preds = 0
+    all_targets = []
+    all_predictions = []
+    for d in train_loader:
+        inputs = d['input_ids'].to(device)
+        masks = d['attention_mask'].to(device)
+        all_targets.extend(list(d['targets'].squeeze().numpy()))
+        targets = d['targets'].to(device)
+        outputs = model(
+            input_ids=inputs,
+            attention_mask=masks
+        )
+        _, preds = torch.max(outputs, dim=1)
+        loss = criterion(outputs, targets)
+        all_predictions.extend(list(preds.cpu().squeeze().numpy()))
+        accurate_preds += torch.sum(preds == targets)
+        losses.append(loss.item())
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+        scheduler.step()
+    return accurate_preds / train_len, np.mean(losses), all_targets, all_predictions
 
 
 def train_iters():
-    best_valid_loss = float('inf')
+    best_valid_acc = 0
     for e in range(EPOCHS):
-        train_loss = 0
-        train_tgt = []
-        train_pred = []
-        exp = []
-        pred = []
-        for i, batch in enumerate(train_buck):
-            loss, train_target, train_prediction = train(batch)
-            train_loss += loss / len(batch)
-            train_tgt.extend(train_target)
-            train_pred.extend(train_prediction)
-
-        valid_loss, expected, prediction = evaluate()
-        if valid_loss < best_valid_loss:
-            print("new best model! improvement: %f" % (best_valid_loss - valid_loss))
-            best_valid_loss = valid_loss
-            torch.save(model.state_dict, open('model.pt', 'wb'))
-        exp.extend(expected)
-        pred.extend(prediction)
-        print(f"epochs: {e} | training precision: {precision_score(train_tgt, train_pred):.4f}   | training recall:"
-              f" {recall_score(train_tgt, train_pred):.4f}   |  training loss: {train_loss / len(train_buck):.4f}")
-        print(f"epochs: {e} | validation precision: {precision_score(expected, prediction):.4f} | validation recall: "
-              f"{recall_score(expected, prediction):.4f} | validation loss: {valid_loss:.4f}\n")
+        print(f"epoch: {e}")
+        train_acc, train_loss, train_tgt, train_pred = train(model)
+        print(f"training loss: {train_loss:.4f} | training accuracy: {train_acc:.4f} | training precision:"
+              f" {precision_score(train_tgt, train_pred):.4f} | training recall:"
+              f" {recall_score(train_tgt, train_pred):.4f}")
+        valid_acc, valid_loss, expected, prediction = evaluate(model, valid_loader, valid_len)
+        print(f"validation loss: {valid_loss:.4f} | validation accuracy: {valid_acc:.4f} | validation precision:"
+              f" {precision_score(expected, prediction):.4f} | validation recall: "
+              f"{recall_score(expected, prediction):.4f}")
+        if best_valid_acc < valid_acc:
+            print("new best model! improvement: %f" % (best_valid_acc - valid_acc))
+            best_valid_acc = valid_acc
+            torch.save(model.state_dict(), 'model.pt')
 
 
-def evaluate():
+def evaluate(model, loader, data_len):
+    model = model.eval()
     with torch.no_grad():
         all_targets = []
         all_preds = []
-        loss = 0
-        for b in valid_buck:
-            label = b[1].view(-1, 1).to(dtype=torch.float)
-            all_targets.extend(list(label.squeeze().cpu().numpy()))
-            text = b[0]
-            output = model(text)
-            loss += criterion(output, label) / len(b)
-            pred = list(map(int, output > 0))
-            all_preds.extend(pred)
-    return loss / len(valid_buck), all_targets, all_preds
+        accurate_preds = 0
+        losses = []
+        for d in loader:
+            inputs = d['input_ids'].to(device)
+            masks = d['attention_mask'].to(device)
+            all_targets.extend(list(d['targets'].squeeze().numpy()))
+            targets = d['targets'].to(device)
+            outputs = model(
+                input_ids=inputs,
+                attention_mask=masks
+            )
+            _, preds = torch.max(outputs, dim=1)
+            loss = criterion(outputs, targets)
+            all_preds.extend(list(preds.cpu().squeeze().numpy()))
+            accurate_preds += torch.sum(preds == targets)
+            losses.append(loss.item())
+    return accurate_preds / data_len, np.mean(losses), all_targets, all_preds
 
 
-train_iters()
+if __name__ == '__main__':
+    train_iters()
+    model.load_state_dict(torch.load('model.pt'))
+    model.eval()
+    acc, loss, tgt, pred = evaluate(model, test_loader, test_len)
+    print(f"test loss: {loss:.4f} | test accuracy: {acc:.4f} | test precision:"
+          f" {precision_score(tgt, pred):.4f} | test recall: "
+          f"{recall_score(tgt, pred):.4f}")

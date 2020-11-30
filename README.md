@@ -1,4 +1,4 @@
-# Sentiment Analysis model comparision
+# Sentiment Analysis model comparison
 
 ## Problem Statement:
 
